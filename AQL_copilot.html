@@ -1,0 +1,402 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <title>10by10by10mini_ScoreManagement</title>
+  <style>
+    body {
+      font-family: sans-serif;
+      background: #f9f9f9;
+      padding: 10px;
+      margin: 0;
+    }
+
+    .controls {
+      text-align: center;
+      margin-bottom: 10px;
+    }
+
+    .controls input {
+      width: 60px;
+      font-size: 1em;
+      text-align: center;
+    }
+
+    .controls button {
+      margin-left: 8px;
+      padding: 4px 8px;
+      font-size: 0.9em;
+    }
+
+    .player.selected {
+      box-shadow: 0 0 0 2px #007acc;
+    }
+
+    .teams {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .team {
+      flex: 1 1 48%;
+      background: #fff;
+      border: 1px solid #ccc;
+      border-radius: 8px;
+      padding: 10px;
+      box-sizing: border-box;
+    }
+
+    .team.winner {
+      background-color: #fffa90 !important;
+    }
+
+    .team input.team-name {
+      font-size: 1.8em;
+      font-weight: bold;
+      text-align: center;
+      margin-bottom: 10px;
+      width: 100%;
+      border: none;
+      border-bottom: 1px solid #aaa;
+      background: #f9f9f9;
+    }
+
+    .players {
+      display: flex;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 4px;
+    }
+
+    .player {
+      flex: 1 1 14%;
+      padding: 4px;
+      border: 1px solid #ddd;
+      border-radius: 6px;
+      background: #fefefe;
+      font-size: 0.85em;
+      transition: background 0.2s, box-shadow 0.2s;
+      cursor: pointer;
+    }
+
+    .player.reach {
+      background: #fffa90;
+    }
+
+    .disabled {
+      opacity: 0.5;
+    }
+
+    .player button {
+      margin: 4px 3px;
+      padding: 6px 10px;
+      font-size: 1em;
+    }
+
+    button.correct {
+      background-color: #F44336; /* 赤：正解 */
+      color: white;
+      border-radius: 4px;
+      border: none;
+      padding: 6px 12px;
+      font-weight: bold;
+    }
+
+    button.wrong {
+      background-color: #0095D9; /* 青：誤答 */
+      color: white;
+      border-radius: 4px;
+      border: none;
+      padding: 6px 12px;
+      font-weight: bold;
+    }
+
+    .score {
+      font-size: 3.4em;
+      font-weight: bold;
+      margin-top: 10px;
+      color: #000;
+      text-align: center;
+    }
+
+    .result {
+      margin-top: 20px;
+      font-size: 2em;
+      font-weight: bold;
+      text-align: center;
+    }
+
+    .point {
+      font-size: 2.6em;
+      font-weight: bold;
+      color: #333;
+      margin-top: 5px;
+    }
+
+    .miss {
+      font-size: 1.6em;
+      color: #d00;
+    }
+
+    .names input {
+      width: 90%;
+      margin: 2px 0;
+      font-size: 1em;
+      padding: 4px;
+    }
+  </style>
+</head>
+<body>
+
+  <h2 style="text-align:center;">10by10by10mini_ScoreManagement</h2>
+
+  <div class="controls">
+    勝利点数:
+    <input type="number" id="winThreshold" value="200" min="1" oninput="updateScores()">
+    &nbsp;&nbsp;
+    <span id="questionContainer">
+      問題数: <span id="questionCount">0</span>
+    </span>
+    <button onclick="toggleQuestion()">問題数 表示切替</button>
+    <button id="skipBtn" onclick="passSelected()">スルー</button>
+    <button id="undoBtn" onclick="undo()" disabled>Undo</button>
+  </div>
+
+  <br>
+
+  <div class="teams">
+    <div class="team" id="teamA">
+      <input type="text" class="team-name" placeholder="チームA">
+      <div class="players" id="playersA"></div>
+      <div class="score"><span id="scoreA">1</span></div>
+    </div>
+
+    <div class="team" id="teamB">
+      <input type="text" class="team-name" placeholder="チームB">
+      <div class="players" id="playersB"></div>
+      <div class="score"><span id="scoreB">1</span></div>
+    </div>
+  </div>
+
+  <div class="result" id="result"></div>
+
+  <script>
+    // 基本ステート
+    const teamA = [1,1,1,1,1];
+    const teamB = [1,1,1,1,1];
+    const rightsA = [true,true,true,true,true];
+    const rightsB = [true,true,true,true,true];
+    const wrongCountA = [0,0,0,0,0];
+    const wrongCountB = [0,0,0,0,0];
+    const namesA = Array(5).fill().map(() => ["",""]);
+    const namesB = Array(5).fill().map(() => ["",""]);
+    let questionCount = 0;
+
+    const history = [];
+    let selectedPlayer = { teamId: null, idx: null, elem: null };
+
+    function pushHistory() {
+      history.push({
+        questionCount,
+        teamA: teamA.slice(),
+        teamB: teamB.slice(),
+        wrongCountA: wrongCountA.slice(),
+        wrongCountB: wrongCountB.slice(),
+        rightsA: rightsA.slice(),
+        rightsB: rightsB.slice()
+      });
+      updateUndoButton();
+    }
+
+    function undo() {
+      if (!history.length) return;
+      const prev = history.pop();
+      questionCount = prev.questionCount;
+      copyArray(prev.teamA, teamA);
+      copyArray(prev.teamB, teamB);
+      copyArray(prev.wrongCountA, wrongCountA);
+      copyArray(prev.wrongCountB, wrongCountB);
+      copyArray(prev.rightsA, rightsA);
+      copyArray(prev.rightsB, rightsB);
+      document.getElementById('questionCount').textContent = questionCount;
+      renderAll(); updateScores(); updateUndoButton();
+      document.getElementById('teamA').classList.remove('winner');
+      document.getElementById('teamB').classList.remove('winner');
+    }
+
+    function copyArray(src, dst) {
+      for (let i = 0; i < src.length; i++) dst[i] = src[i];
+    }
+
+    function updateUndoButton() {
+      document.getElementById('undoBtn').disabled = history.length === 0;
+    }
+
+    function selectPlayer(teamId, idx, elem) {
+      if (selectedPlayer.elem) selectedPlayer.elem.classList.remove('selected');
+      selectedPlayer = { teamId, idx, elem };
+      elem.classList.add('selected');
+    }
+
+    function renderTeam(teamId, teamPoints, rights, wrongs, names) {
+      const container = document.getElementById(`players${teamId}`);
+      container.innerHTML = '';
+      const threshold = parseInt(document.getElementById('winThreshold').value) || 200;
+      const sum = teamPoints.reduce((a,b) => a*b, 1);
+      const order = teamId === 'A' ? [4,3,2,1,0] : [0,1,2,3,4];
+
+      order.forEach(i => {
+        const willReach = rights[i]
+          && sum < threshold
+          && (sum / teamPoints[i] * (teamPoints[i]+1) >= threshold);
+
+        const div = document.createElement('div');
+        div.className = 'player' +
+                        (willReach ? ' reach' : '') +
+                        (!rights[i] ? ' disabled' : '');
+        div.addEventListener('click', () => {
+          if (rights[i]) selectPlayer(teamId, i, div);
+        });
+
+        div.innerHTML = `
+          <center>
+            <div><strong>${i+1}番</strong></div>
+            <div class="names">
+              <input type="text" value="${names[i][0]}"
+                     oninput="updateName('${teamId}',${i},0,this.value)"
+                     placeholder="名前1">
+              <input type="text" value="${names[i][1]}"
+                     oninput="updateName('${teamId}',${i},1,this.value)"
+                     placeholder="名前2">
+            </div>
+            <div>
+              <button class="correct" onclick="correct('${teamId}',${i})" ${!rights[i] ? 'disabled':''}>正解</button>
+              <button class="wrong" onclick="wrong('${teamId}',${i})" ${!rights[i] ? 'disabled':''}>誤答</button>
+            </div>
+            <div class="point">
+              <span id="${teamId}p${i}">${teamPoints[i]}</span>
+            </div>
+            <div class="miss">
+              ×<span id="${teamId}w${i}">${wrongs[i]}</span>
+            </div>
+          </center>
+        `;
+        container.appendChild(div);
+      });
+    }
+
+    function updateName(teamId, idx, nameIdx, val) {
+      const arr = teamId === 'A' ? namesA : namesB;
+      arr[idx][nameIdx] = val;
+    }
+
+    function correct(teamId, idx) {
+      pushHistory();
+      questionCount++;
+      document.getElementById('questionCount').textContent = questionCount;
+      (teamId === 'A' ? teamA : teamB)[idx]++;
+      renderAll(); updateScores();
+    }
+
+    function wrong(teamId, idx) {
+      pushHistory();
+      questionCount++;
+      document.getElementById('questionCount').textContent = questionCount;
+
+      if (teamId === 'A') {
+        wrongCountA[idx]++; teamA[idx] = 1;
+        if (wrongCountA[idx] >= 2) rightsA[idx] = false;
+        reviveRights('B');
+      } else {
+        wrongCountB[idx]++; teamB[idx] = 1;
+        if (wrongCountB[idx] >= 2) rightsB[idx] = false;
+        reviveRights('A');
+      }
+
+      renderAll(); updateScores();
+    }
+
+    function passSelected() {
+      pushHistory();
+      questionCount++;
+      document.getElementById('questionCount').textContent = questionCount;
+      renderAll(); updateScores();
+    }
+
+    function reviveRights(opTeamId) {
+      const rights = opTeamId === 'A' ? rightsA : rightsB;
+      const wrongs = opTeamId === 'A' ? wrongCountA : wrongCountB;
+      for (let i = 0; i < 5; i++) {
+        if (!rights[i] && wrongs[i] >= 2) {
+          rights[i] = true; wrongs[i] = 1;
+        }
+      }
+    }
+
+    function allLost(rights) {
+      return rights.every(r => !r);
+    }
+
+    function updateScores() {
+      const threshold = parseInt(document.getElementById('winThreshold').value) || 200;
+      const sumA = teamA.reduce((a,b)=>a*b,1);
+      const sumB = teamB.reduce((a,b)=>a*b,1);
+      document.getElementById('scoreA').textContent = Math.min(sumA, threshold);
+      document.getElementById('scoreB').textContent = Math.min(sumB, threshold);
+
+      const nameA = document.querySelector('#teamA .team-name').value.trim() || 'チームA';
+      const nameB = document.querySelector('#teamB .team-name').value.trim() || 'チームB';
+
+      const resultEl = document.getElementById('result');
+      if (sumA >= threshold || sumB >= threshold || allLost(rightsA) || allLost(rightsB)) {
+        let finalA = sumA >= threshold || allLost(rightsB) ? threshold : sumA;
+        let finalB = sumB >= threshold || allLost(rightsA) ? threshold : sumB;
+        if (allLost(rightsA)) finalA = 1;
+        if (allLost(rightsB)) finalB = 1;
+
+        // まず既存の winner クラスを全て外す
+        document.getElementById('teamA').classList.remove('winner');
+        document.getElementById('teamB').classList.remove('winner');
+
+        // 勝利判定後に勝利チームへクラス追加
+        if (finalA > finalB) {
+          document.getElementById('teamA').classList.add('winner');
+        } else if (finalB > finalA) {
+          document.getElementById('teamB').classList.add('winner');
+          }
+
+
+        const diff = Math.abs(finalA - finalB);
+        const msg = finalA > finalB
+          ? `${nameA} の勝利！`
+          : finalB > finalA
+            ? `${nameB} の勝利！`
+            : '引き分け！'; 
+
+        resultEl.textContent = `${msg} 得失点差: ${diff}`;
+      } else {
+        resultEl.textContent = '';
+      }
+
+
+    }
+
+    function renderAll() {
+      renderTeam('A', teamA, rightsA, wrongCountA, namesA);
+      renderTeam('B', teamB, rightsB, wrongCountB, namesB);
+    }
+
+    function toggleQuestion() {
+      const el = document.getElementById('questionContainer');
+      el.style.display = el.style.display === 'none' ? 'inline' : 'none';
+    }
+
+    // 初期化
+    renderAll();
+    updateScores();
+    updateUndoButton();
+  </script>
+</body>
+</html>
